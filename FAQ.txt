@@ -1,0 +1,4 @@
+1. What are the Python libraries that can be used for doing the Assignment?
+
+You can use the commonly used libraries in Python. However, avoid the rarely used libraries that the evaluators will have to install before evaluating your code. This will make the process of evaluation very tedious. When in doubt, contact the TAs. Also, you are supposed to implement the GA algorithm, which means you should not use some library that already has an implementation of the GA algorithm. As I said, if you have a doubt regarding the libraries, then clarify it with the TAs. If you still have questions, then you can ask me after the lecture.
+
