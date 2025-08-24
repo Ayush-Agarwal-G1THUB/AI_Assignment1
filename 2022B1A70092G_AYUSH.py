@@ -1,6 +1,7 @@
 from CNF_Creator import *
 import numpy as np
 import time
+import math
 
 def createRandomPopulation (population_size = 20, num_symbols=50) -> np.ndarray:
     """
@@ -81,13 +82,15 @@ def crossover(parents, num_offspring=1, crossover_type="single", num_points=1):
 
     return offspring
 
-def mutate (children, mutation_rate=0.01) :
+def mutate (children, gen) :
+    sim_anneal_speed = 0.1
+    mutation_rate = max(0.01, math.exp(-gen * sim_anneal_speed) * 0.5)
     mutation_mask = np.random.rand(*children.shape) < mutation_rate
     mutated_children = children ^ mutation_mask
 
     return mutated_children
 
-def generateNextPopulationCulling (population, fitness, sentence, cull_frac=2):
+def generateNextPopulationCulling (population, fitness, sentence, gen, cull_frac=2):
     """
     This function generates the next population based on the current population and its fitness values
     It generates extra children and then discards the lowest performing ones
@@ -105,7 +108,7 @@ def generateNextPopulationCulling (population, fitness, sentence, cull_frac=2):
     while len(next_population) < generated_pop_size:
         parents = selectParentsStochastic(population, probabilities)
         children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children)
+        mutated_children = mutate(children, gen)
         next_population.extend(mutated_children)
 
     next_population = np.asarray(next_population[:generated_pop_size], dtype=population.dtype)
@@ -119,7 +122,7 @@ def generateNextPopulationCulling (population, fitness, sentence, cull_frac=2):
 
     return next_population
 
-def generateNextPopulationElitism (population, fitness, elite_frac=0.2) :
+def generateNextPopulationElitism (population, fitness, sentence, gen, elite_frac=0.2) :
     """
     This function generates the next population based on the current population and its fitness values
     It also employs elitism, retaining the top elite_frac percentage of individuals in the parent population
@@ -144,12 +147,12 @@ def generateNextPopulationElitism (population, fitness, elite_frac=0.2) :
     while len(next_population) < pop_size:
         parents = selectParentsStochastic(population, probabilities)
         children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children)
+        mutated_children = mutate(children, gen)
         next_population.extend(mutated_children)
 
     return np.asarray(next_population[:pop_size], dtype=population.dtype)
 
-def generateNextPopulationBasic (population, fitness) :
+def generateNextPopulationBasic (population, fitness, sentence, gen) :
     """
     This function generates the next population based on the current population and its fitness values
     """
@@ -165,7 +168,7 @@ def generateNextPopulationBasic (population, fitness) :
     while len(next_population) < pop_size:
         parents = selectParentsStochastic(population, probabilities)
         children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children)
+        mutated_children = mutate(children, gen)
         next_population.extend(mutated_children)
 
     return np.asarray(next_population[:pop_size], dtype=population.dtype)
@@ -202,7 +205,7 @@ def main() :
             break
 
         # If not solved yet, generate the next population
-        new_population = generateNextPopulationCulling(population, fitness, sentence)
+        new_population = generateNextPopulationElitism(population, fitness, sentence, gen)
         population = new_population
 
         gen += 1
