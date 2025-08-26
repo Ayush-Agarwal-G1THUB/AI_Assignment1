@@ -7,15 +7,29 @@ def createRandomPopulation (population_size = 20, num_symbols=50) -> np.ndarray:
     """
     This function generates a population of models, where each model has random values
     The population is stored as a 2D numpy array, where each row is a model
+
+    Args:
+        population_size : The size of the population to be generated
+        num_symbols     : The number of different literals in the problem sentence
+
+    Returns:
+        population      : The randomly generated population
     """
     population = np.random.randint(0, 2, size=(population_size, num_symbols), dtype=np.int8)
 
     return population
 
-def fitnessFunction (individual, sentence) :
+def calculateFitness (individual, sentence) :
     """
     This function computes the fitness of an individual in a population for a given sentence
     The fitness function is simply the percentage of true clauses
+
+    Args:
+        individual  : The particular individual whose fitness must be calculated
+        sentence    : The problem statement
+
+    Returns:
+        fitness     : The fitness of the individual for the problem statement
     """
     fitness = 0
     for clause in sentence :
@@ -30,13 +44,28 @@ def fitnessFunction (individual, sentence) :
 def evaluatePopulation (population, sentence) :
     """
     This function evaluates the fitness values for the entire population and returns it as a numpy array
-    """
-    return np.array([fitnessFunction(ind, sentence) for ind in population])
 
-def selectParentsStochastic (population, probabilities, num_parents=2) :
+    Args:
+        population  : The population to be evaluated
+        sentence    : The problem statement
+
+    Returns:
+        fitness     : A 1D np.array containing the fitness values of each individual
+    """
+    return np.array([calculateFitness(ind, sentence) for ind in population])
+
+def selectParentsRoulette (population, probabilities, num_parents=2) :
     """
     This function selects parents from a population with probabilities proportional to their fitness values
     and returns the parents (not their indices)
+
+    Args:
+        population      : The population from which the parents are to be selected
+        probabilities   : A 1D array representing the normalised fitness for each individual
+        num_parents     : The number of parents from which a single child is generated
+
+    Returns:
+        parents         : An array containing the individuals who are to be used as parents
     """
     parents_idx = np.random.choice(len(population), size=num_parents, p=probabilities)
 
@@ -82,28 +111,51 @@ def crossover(parents, num_offspring=1, crossover_type="single", num_points=1):
 
     return offspring
 
-def mutate (children, gen, stagnation_counter) :
-    sim_anneal_speed = 0.01
+def mutate (population, gen, stagnation_counter) :
+    """
+    This function performs random point mutations on the individuals of a population
+
+    Args:
+        population  : A 2D np array representing all the individuals of the population
+        gen         : The current generation
+        stagnation_counter : The number of generations for which the fitness value has not changed
+
+    Returns:
+        mutated_population : The mutated population 
+    """
+    sim_anneal_speed = 0.001
     mutation_rate = max(0.01, math.exp(-gen * sim_anneal_speed) * 0.5)
 
     if stagnation_counter > 50 :
-        mutation_rate = min(0.75, mutation_rate+(stagnation_counter*0.01)) # temporary boost of 0.1
+        mutation_rate = min(0.8, mutation_rate+(stagnation_counter*0.01)) # temporary boost if stagnant
         # print(stagnation_counter, "------ Mutation boosted ------ ", gen)
 
-    mutation_mask = np.random.rand(*children.shape) < mutation_rate
-    mutated_children = children ^ mutation_mask
+    mutation_mask = np.random.rand(*population.shape) < mutation_rate
+    mutated_population = population ^ mutation_mask
 
-    return mutated_children
+    return mutated_population
 
-def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stagnation_counter, elite_frac=0.2, cull_frac=2) :
+def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stagnation_counter, elite_frac=0.1, cull_fact=2) :
     """
     This function generates the next population based on the current population and its fitness values. 
     It generates extra children and then discards the lowest performing ones.
     It also retains the highest performing individuals from the parent population
+
+    Args:
+        population  : A 2D np array containing all the individuals
+        fitness     : A 1D array containing the fitness values of the corresponding individual
+        sentence    : The problem statement expression
+        gen         : The current generation
+        stagnation_counter : The number of generations for which the fitness value has not changed
+        elite_frac  : The fraction of best performing individuals who are retained into the next generation
+        cull_fact   : The factor by which the population size is multiplied, to generate the next population, from which the worst performers are culled
+
+    Returns:
+        next_population : The 2D np array containing the individuals of the next generation
     """
     pop_size = len(population)
     elite_size = max(1, int(elite_frac * pop_size))
-    to_cull_pop_size = int(cull_frac * pop_size)
+    to_cull_pop_size = int(cull_fact * pop_size)
     next_population = []
 
     elite_indices = np.argsort(fitness)[-elite_size:]
@@ -118,7 +170,7 @@ def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stag
     next_population = list(elites)
 
     while len(next_population) < (to_cull_pop_size - elite_size):
-        parents = selectParentsStochastic(population, probabilities)
+        parents = selectParentsRoulette(population, probabilities)
         children = crossover(parents, len(parents)) # generate same number of children as parents
         mutated_children = mutate(children, gen, stagnation_counter)
         next_population.extend(mutated_children)
@@ -126,103 +178,24 @@ def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stag
     next_population = np.asarray(next_population[:to_cull_pop_size], dtype=population.dtype)
 
     # Evaluate children’s fitness
-    child_fitness = np.array([fitnessFunction(ind, sentence) for ind in next_population])
+    child_fitness = np.array([calculateFitness(ind, sentence) for ind in next_population])
 
     # Select best pop_size from children
     best_indices = np.argsort(child_fitness)[-pop_size:]
     next_population = next_population[best_indices]
 
     return next_population
-
-def generateNextPopulationCulling (population, fitness, sentence, gen, stagnation_counter, cull_frac=2):
-    """
-    This function generates the next population based on the current population and its fitness values
-    It generates extra children and then discards the lowest performing ones
-    """
-    pop_size = len(population)
-    generated_pop_size = int(cull_frac * pop_size)
-    next_population = []
-
-    probabilities:np.ndarray
-    if fitness.sum() == 0:
-        probabilities = np.ones_like(fitness, dtype=float) / len(fitness)
-    else :
-        probabilities = fitness / fitness.sum()
-
-    while len(next_population) < generated_pop_size:
-        parents = selectParentsStochastic(population, probabilities)
-        children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children, gen, stagnation_counter)
-        next_population.extend(mutated_children)
-
-    next_population = np.asarray(next_population[:generated_pop_size], dtype=population.dtype)
-
-    # Evaluate children’s fitness
-    child_fitness = np.array([fitnessFunction(ind, sentence) for ind in next_population])
-
-    # Select best pop_size from children
-    best_indices = np.argsort(child_fitness)[-pop_size:]
-    next_population = next_population[best_indices]
-
-    return next_population
-
-def generateNextPopulationElitism (population, fitness, sentence, gen, stagnation_counter, elite_frac=0.2) :
-    """
-    This function generates the next population based on the current population and its fitness values
-    It also employs elitism, retaining the top elite_frac percentage of individuals in the parent population
-    """
-    pop_size = len(population)
-    elite_size = max(1, int(elite_frac * pop_size)) # Ensure at least 1 elite
-
-    # Find individuals with highest fitness values
-    elite_indices = np.argsort(fitness)[-elite_size:]
-    elites = population[elite_indices]
-
-    probabilities:np.ndarray
-    if fitness.sum() == 0:
-        probabilities = np.ones_like(fitness, dtype=float) / len(fitness)
-    else :
-        probabilities = fitness / fitness.sum()
-
-    # Add the elites into the new population
-    next_population = list(elites)
-
-    # Add children into the population
-    while len(next_population) < pop_size:
-        parents = selectParentsStochastic(population, probabilities)
-        children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children, gen, stagnation_counter)
-        next_population.extend(mutated_children)
-
-    return np.asarray(next_population[:pop_size], dtype=population.dtype)
-
-def generateNextPopulationBasic (population, fitness, sentence, gen, stagnation_counter) :
-    """
-    This function generates the next population based on the current population and its fitness values
-    """
-    pop_size = len(population)
-    next_population = []
-
-    probabilities:np.ndarray
-    if fitness.sum() == 0:
-        probabilities = np.ones_like(fitness, dtype=float) / len(fitness)
-    else :
-        probabilities = fitness / fitness.sum()
-
-    while len(next_population) < pop_size:
-        parents = selectParentsStochastic(population, probabilities)
-        children = crossover(parents, len(parents)) # generate same number of children as parents
-        mutated_children = mutate(children, gen, stagnation_counter)
-        next_population.extend(mutated_children)
-
-    return np.asarray(next_population[:pop_size], dtype=population.dtype)
 
 def main() :
+    TIME_LIMIT = 44.8
     start_time = time.time()
 
     cnfC = CNF_Creator(n=50) # n is number of symbols in the 3-CNF sentence
-    sentence = cnfC.CreateRandomSentence(m=200) # m is number of clauses in the 3-CNF sentence
+    sentence = cnfC.CreateRandomSentence(m=120) # m is number of clauses in the 3-CNF sentence
     # print('Random sentence : ',sentence)
+
+    # sentence = cnfC.ReadCNFfromCSVfile()
+    # print('\nSentence from CSV file : ',sentence)
 
     max_generations = 99999999
     generation = 1
@@ -230,11 +203,11 @@ def main() :
     stagnation_counter = 0
 
     # Create population of models
-    population_size = 200
+    population_size = 300
     population = createRandomPopulation(population_size)
 
     # REPEAT till time = 45s or fitness values don't change or maximum number of generaions is reached
-    while generation < max_generations and (time.time()-start_time < 44.8):
+    while generation < max_generations and (time.time()-start_time < TIME_LIMIT):
         # Evaluate fitness of each model in the population
         fitness = evaluatePopulation(population, sentence)
 
@@ -248,16 +221,18 @@ def main() :
 
         best_fitness_history.append(best_fitness)
         if generation%50 == 0:
+            print("Generation ", generation)
             print("Best fitness value = ", best_fitness)
             print("Time : ", time.time()-start_time)
+            print()
 
         # Check if SAT expression is solved
         if best_fitness == 1 :
-            print("Solved!\n", population[best_parent])
+            print("Solved in ", generation , " generations\n", population[best_parent])
             break
 
         # If not solved yet, generate the next population
-        new_population = generateNextPopulationEliteCulling(population, fitness, sentence, generation, stagnation_counter)
+        new_population = generateNextPopulationEliteCulling(population, fitness, sentence, generation, stagnation_counter, elite_frac=0.2, cull_fact=2)
         population = new_population
 
         generation += 1
@@ -266,8 +241,6 @@ def main() :
 
 
 
-    # sentence = cnfC.ReadCNFfromCSVfile()
-    # print('\nSentence from CSV file : ',sentence)
 
     # print('\n\n')
     # print('Roll No : 2020H1030999G')
