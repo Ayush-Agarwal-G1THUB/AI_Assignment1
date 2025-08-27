@@ -54,22 +54,40 @@ def evaluatePopulation (population, sentence) :
     """
     return np.array([calculateFitness(ind, sentence) for ind in population])
 
-def selectParentsRoulette (population, probabilities, num_parents=2) :
+def selectParents (population, fitness, probabilities, type="tournament", num_parents=2) :
     """
-    This function selects parents from a population with probabilities proportional to their fitness values
+    This function selects parents from a population 
+    In roulette, the selection happens with probabilities proportional to their fitness values
     and returns the parents (not their indices)
+    In tournament, the selection happens by taking a random subset of the population
+    and selecting their fittest members as the parents
 
     Args:
         population      : The population from which the parents are to be selected
+        fitness         : A 1D array representing the fitness values of each individual
         probabilities   : A 1D array representing the normalised fitness for each individual
         num_parents     : The number of parents from which a single child is generated
 
     Returns:
         parents         : An array containing the individuals who are to be used as parents
     """
-    parents_idx = np.random.choice(len(population), size=num_parents, p=probabilities)
+    parents = np.array
 
-    return population[parents_idx]
+    if type == 'tournament':
+        pool_size = int(0.3 * len(population))
+        parent_pool_idx = np.random.choice(len(population), size=pool_size, replace=False)
+        parent_pool = population[parent_pool_idx]
+        pool_fitnesses = fitness[parent_pool_idx]
+
+        sorted_idx = np.argsort(-pool_fitnesses)
+        pool_sorted = parent_pool[sorted_idx]
+
+        parents = pool_sorted[:num_parents]
+    else:
+        parents_idx = np.random.choice(len(population), size=num_parents, p=probabilities)
+        parents = population[parents_idx]
+
+    return parents
 
 def crossover(parents, num_offspring=1, crossover_type="single", num_points=1):
     """
@@ -135,7 +153,7 @@ def mutate (population, gen, stagnation_counter) :
 
     return mutated_population
 
-def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stagnation_counter, elite_frac=0.1, cull_fact=2) :
+def generateNextPopulation (population, fitness, sentence, gen, stagnation_counter, elite_frac=0.1, cull_fact=2) :
     """
     This function generates the next population based on the current population and its fitness values. 
     It generates extra children and then discards the lowest performing ones.
@@ -170,7 +188,7 @@ def generateNextPopulationEliteCulling (population, fitness, sentence, gen, stag
     next_population = list(elites)
 
     while len(next_population) < (to_cull_pop_size - elite_size):
-        parents = selectParentsRoulette(population, probabilities)
+        parents = selectParents (population, fitness, probabilities, type='roulette')
         children = crossover(parents, len(parents)) # generate same number of children as parents
         mutated_children = mutate(children, gen, stagnation_counter)
         next_population.extend(mutated_children)
@@ -197,16 +215,19 @@ def main() :
     # sentence = cnfC.ReadCNFfromCSVfile()
     # print('\nSentence from CSV file : ',sentence)
 
-    max_generations = 99999999
+    max_generations = 10000
     generation = 1
     best_fitness_history = [0.0]
     stagnation_counter = 0
 
     # Create population of models
-    population_size = 300
-    population = createRandomPopulation(population_size)
+    POPULATION_SIZE = 300
+    population = createRandomPopulation(POPULATION_SIZE)
 
-    # REPEAT till time = 45s or fitness values don't change or maximum number of generaions is reached
+    # REPEAT till 
+    #   time limit reached or 
+    #   best fitness value doesn't change or 
+    #   maximum number of generaions is reached
     while generation < max_generations and (time.time()-start_time < TIME_LIMIT):
         # Evaluate fitness of each model in the population
         fitness = evaluatePopulation(population, sentence)
@@ -232,7 +253,7 @@ def main() :
             break
 
         # If not solved yet, generate the next population
-        new_population = generateNextPopulationEliteCulling(population, fitness, sentence, generation, stagnation_counter, elite_frac=0.2, cull_fact=2)
+        new_population = generateNextPopulation(population, fitness, sentence, generation, stagnation_counter, elite_frac=0.2, cull_fact=2)
         population = new_population
 
         generation += 1
