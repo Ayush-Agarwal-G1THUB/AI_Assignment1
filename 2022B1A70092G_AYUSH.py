@@ -52,7 +52,23 @@ def evaluatePopulation (population, sentence) :
     Returns:
         fitness     : A 1D np.array containing the fitness values of each individual
     """
-    return np.array([calculateFitness(ind, sentence) for ind in population])
+    N, M = population.shape
+    clause_results = np.zeros((N, len(sentence)), dtype=bool)
+
+    for j, clause in enumerate(sentence):
+        # For each literal in the clause, evaluate satisfaction across all individuals
+        satisfied = np.zeros(N, dtype=bool)
+        for lit in clause:
+            idx = abs(lit) - 1
+            if lit > 0:
+                satisfied |= (population[:, idx] == 1)
+            else:
+                satisfied |= (population[:, idx] == 0)
+        clause_results[:, j] = satisfied
+
+    fitness = clause_results.sum(axis=1) / len(sentence)
+
+    return fitness
 
 def selectParents (population, fitness, probabilities, type="tournament", num_parents=2) :
     """
@@ -196,7 +212,7 @@ def generateNextGAPopulation (population, fitness, sentence, gen, stagnation_cou
     next_population = np.asarray(next_population[:to_cull_pop_size], dtype=population.dtype)
 
     # Evaluate children’s fitness
-    child_fitness = np.array([calculateFitness(ind, sentence) for ind in next_population])
+    child_fitness = evaluatePopulation(next_population, sentence)
 
     # Select best pop_size from children
     best_indices = np.argsort(child_fitness)[-pop_size:]
@@ -216,31 +232,90 @@ def getNeighbours (population) :
         next_population : A 2D np array containing all the neighbours
     """
 
-    neighbours = population.copy()
+    N, M = population.shape
+    
+    # Repeat each individual M times (once per bit flip)
+    repeated = np.repeat(population, M, axis=0)  # shape (N*M, M)
+    
+    # Indices of bits to flip
+    flip_indices = np.tile(np.arange(M), N)
+    
+    # Flip using XOR with 1
+    repeated[np.arange(N*M), flip_indices] ^= 1
+    
+    # Add originals as well (optional — matches your current code)
+    neighbours = np.vstack([population, repeated])
 
-    for individual in population:
-        for i in range(population.shape[1]):
-            neighbour = individual.copy()                   # Make a local copy of the individual
-            neighbour[i] = 1 - neighbour[i]                 # Flip the bit
-            neighbours = np.vstack([neighbours, neighbour]) # Add to the array
+    return np.array(neighbours, dtype=population.dtype)
 
-    return neighbours
+def generateNextBSPopulation (population, sentence, type='stochastic') :
+    """
+    This function generates the next generation of a population using Beam Search
+    Local Beam Search simply takes the top k fittest successors
+    Stochastic Beam Search takes k samples from the successors
 
-def generateNextBSPopulation (population, fitness, sentence, type='local') :
+    Args :
+        population  : A 2D np array containing all the individuals
+        sentence    : The problem statement, used to find fitness of an individual
+        type        : To choose between local beam search and stochastic beam search
+
+    Returns :
+        next_population : 
+    """
     neighbours = getNeighbours(population)
-    neighbours = np.unique(neighbours, axis=0) # Only use unique neighbours for beam search pool
-    neighbours_fitness = np.array([calculateFitness(ind, sentence) for ind in neighbours])
-    best_indices = np.argsort(neighbours_fitness)[-len(population):]
+    # neighbours = np.unique(neighbours, axis=0) # Only use unique neighbours for beam search pool
+    neighbours_fitness = evaluatePopulation(neighbours, sentence)
+
+    if type == 'local' :
+        best_indices = np.argsort(neighbours_fitness)[-len(population):]
+    else : # Stochastic
+        fitness_sum = np.sum(neighbours_fitness)
+        if fitness_sum == 0:
+            # If all fitness values are zero, sample uniformly at random
+            probabilities = np.ones(len(neighbours_fitness)) / len(neighbours_fitness)
+        else:
+            probabilities = neighbours_fitness / fitness_sum
+        
+        k = len(population)
+        # Always keep the single best candidate
+        elite_index = np.argmax(neighbours_fitness)
+        best_indices = [elite_index]
+
+        # Fill the rest stochastically
+        remaining = np.delete(np.arange(len(neighbours)), elite_index)
+        best_indices += list(np.random.choice(
+            remaining,
+            size=k-1,
+            replace=False if len(remaining) >= k-1 else True,
+            p=probabilities[remaining] / np.sum(probabilities[remaining])
+        ))
+
     next_population = neighbours[best_indices]
 
     return next_population
+
+def outputFormatIndividual (individual) :
+    """
+    This function simply creates a string representation of an individual 
+    in the format for in the assignment
+    """
+    ans = "["
+    for i, symbol in enumerate(individual) :
+        if symbol == 0:
+            ans += str(i+1)
+        else :
+            ans += str(-i-1)
+        ans += ", "
+
+    ans += "]"
+    return ans
 
 def main() :
     TIME_LIMIT = 44.8
     start_time = time.time()
 
     cnfC = CNF_Creator(n=50) # n is number of symbols in the 3-CNF sentence
-    sentence = cnfC.CreateRandomSentence(m=150) # m is number of clauses in the 3-CNF sentence
+    sentence = cnfC.CreateRandomSentence(m=180) # m is number of clauses in the 3-CNF sentence
     # print('Random sentence : ',sentence)
 
     # sentence = cnfC.ReadCNFfromCSVfile()
@@ -251,15 +326,12 @@ def main() :
     best_fitness_history = [0.0]
 
     stagnation_counter = 0
-    BS_threshold = 0.99
+    BS_threshold = 0.9925
     BS_flag = False
 
-    POPULATION_SIZE = 200
+    POPULATION_SIZE = 300
     population = createRandomPopulation(POPULATION_SIZE)
 
-    # REPEAT till 
-    #   time limit reached or
-    #   maximum number of generaions is reached
     while generation < max_generations and (time.time()-start_time < TIME_LIMIT):
         fitness = evaluatePopulation(population, sentence)
 
@@ -280,22 +352,26 @@ def main() :
 
         # Check if SAT expression is solved
         if best_fitness == 1 :
-            print("Solved in ", generation , " generations\n", population[best_parent])
+            print("Solved in ", generation , " generations")
+            print(outputFormatIndividual(population[best_parent]))
             break
 
         # If not solved yet
         # If stuck at local optima just below 100%, switch on beam search flag
         if best_fitness >= BS_threshold and stagnation_counter >= 50 and BS_flag==False:
             BS_flag = True
-            print("Switched to Beam Search\n")
+            print("Almost there")
+            print("Switching to Beam Search")
+            print("at generation ", generation, "\n")
 
         if BS_flag or stagnation_counter > 250:
-            if stagnation_counter > 50 and BS_flag==False:
-                print("Temporarily using beam search\n")
-            new_population = generateNextBSPopulation (population, fitness, sentence, type='local')
+            if BS_flag==False: # We have entered BS due to high stagnation_counter
+                print("Population is too stagnant")
+                print("Temporarily using beam search at generation ", generation, "\n")
+            new_population = generateNextBSPopulation (population, sentence, type='stochastic')
             population = new_population
-        # Else continue with GA
-        else :
+        else : 
+            # Continue with GA
             new_population = generateNextGAPopulation (population, fitness, sentence, generation, stagnation_counter, elite_frac=0.2, cull_fact=2)
             population = new_population
 
